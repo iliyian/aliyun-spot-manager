@@ -1,0 +1,28 @@
+[Unit]
+Description=Aliyun Spot Instance Auto-Start Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/aliyun-spot-autoopen
+ExecStart=/opt/aliyun-spot-autoopen/aliyun-spot-autoopen
+Restart=always
+RestartSec=10
+
+# Environment file
+EnvironmentFile=/opt/aliyun-spot-autoopen/.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aliyun-spot
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log
+
+[Install]
+WantedBy=multi-user.target
