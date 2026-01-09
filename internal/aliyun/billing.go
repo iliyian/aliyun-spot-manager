@@ -27,19 +27,24 @@ type InstanceBillingSummary struct {
 	InstanceID   string
 	InstanceName string
 	Region       string
-	InstanceSpec string // 实例规格
+	InstanceSpec string  // 实例规格
 	Items        []BillingItem
 	TotalAmount  float64
+	RunningHours float64 // 运行小时数
+	HourlyCost   float64 // 平均每小时费用
 }
 
-// BillingSummary represents the billing summary (can be for hours or daily)
+// BillingSummary represents the billing summary for the current month
 type BillingSummary struct {
-	StartTime       time.Time
-	EndTime         time.Time
-	Hours           int     // 查询的小时数
-	Instances       []InstanceBillingSummary
-	TotalAmount     float64
-	MonthlyEstimate float64 // 月度估算
+	StartTime           time.Time
+	EndTime             time.Time
+	BillingCycle        string  // 账单周期 (YYYY-MM)
+	ElapsedDays         int     // 本月已过天数
+	TotalRunningHours   float64 // 总运行小时数
+	Instances           []InstanceBillingSummary
+	TotalAmount         float64
+	MonthlyEstimate     float64 // 月度估算
+	EstimateMethod      string  // 估算方法说明
 }
 
 // BillingClient wraps the Aliyun BSS client
@@ -67,13 +72,16 @@ type InstanceInfo struct {
 	RegionID     string
 }
 
-// QueryBillingByHours queries billing for the specified instances within the last N hours
-func (c *BillingClient) QueryBillingByHours(instances []InstanceInfo, hours int) (*BillingSummary, error) {
+// QueryBilling queries billing for the specified instances for the current month
+// Note: Aliyun API returns monthly cumulative data, so we query the current month's data
+// and calculate monthly estimate based on actual running time (ServicePeriod in seconds)
+func (c *BillingClient) QueryBilling(instances []InstanceInfo) (*BillingSummary, error) {
 	now := time.Now()
-	startTime := now.Add(-time.Duration(hours) * time.Hour)
+	// Start of current month
+	startTime := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 
-	log.Debugf("Querying billing for %d instances, last %d hours (from %s to %s)",
-		len(instances), hours, startTime.Format("2006-01-02 15:04"), now.Format("2006-01-02 15:04"))
+	log.Debugf("Querying billing for %d instances, current month %s",
+		len(instances), now.Format("2006-01"))
 
 	// Create instance ID to info map for quick lookup
 	instanceMap := make(map[string]InstanceInfo)
@@ -81,150 +89,189 @@ func (c *BillingClient) QueryBillingByHours(instances []InstanceInfo, hours int)
 		instanceMap[inst.InstanceID] = inst
 	}
 
-	// We may need to query multiple billing cycles if the time range spans months
-	billingCycles := getBillingCycles(startTime, now)
+	// Query current month's billing cycle
+	cycle := now.Format("2006-01")
 
 	// Group billing items by instance
 	instanceBillings := make(map[string]*InstanceBillingSummary)
+	
+	// Track running seconds per instance (to avoid duplicate counting)
+	// Each instance has multiple billing items with the same ServicePeriod
+	instanceRunningSeconds := make(map[string]float64)
 
-	for _, cycle := range billingCycles {
-		log.Debugf("Querying billing cycle: %s", cycle)
+	log.Debugf("Querying billing cycle: %s", cycle)
 
-		// Query instance bill
-		request := bssopenapi.CreateQueryInstanceBillRequest()
-		request.Scheme = "https"
-		request.BillingCycle = cycle
-		request.ProductCode = "ecs"
-		request.IsBillingItem = requests.NewBoolean(true)
-		request.PageSize = requests.NewInteger(300)
-		request.PageNum = requests.NewInteger(1)
+	// Query instance bill
+	request := bssopenapi.CreateQueryInstanceBillRequest()
+	request.Scheme = "https"
+	request.BillingCycle = cycle
+	request.ProductCode = "ecs"
+	request.IsBillingItem = requests.NewBoolean(true)
+	request.PageSize = requests.NewInteger(300)
+	request.PageNum = requests.NewInteger(1)
 
-		response, err := c.client.QueryInstanceBill(request)
-		if err != nil {
-			return nil, fmt.Errorf("failed to query instance bill for cycle %s: %w", cycle, err)
-		}
-
-		log.Debugf("Got %d billing items from API for cycle %s", len(response.Data.Items.Item), cycle)
-
-		for _, item := range response.Data.Items.Item {
-			// Skip if not in our instance list
-			instInfo, exists := instanceMap[item.InstanceID]
-			if !exists {
-				continue
-			}
-
-			// Check if billing is within our time range
-			// ServicePeriod format: "yyyyMMddHHmmss-yyyyMMddHHmmss" or BillingDate: "2006-01-02"
-			if !isBillingInTimeRange(item.ServicePeriod, item.BillingDate, startTime, now) {
-				continue
-			}
-
-			// Debug log to see actual API response fields
-			log.Debugf("Billing item: InstanceID=%s, InstanceSpec=%s, BillingItem=%s, ServicePeriod=%s, PretaxAmount=%.4f",
-				item.InstanceID, item.InstanceSpec, item.BillingItem, item.ServicePeriod, item.PretaxAmount)
-
-			summary, exists := instanceBillings[item.InstanceID]
-			if !exists {
-				summary = &InstanceBillingSummary{
-					InstanceID:   item.InstanceID,
-					InstanceName: instInfo.InstanceName,
-					Region:       instInfo.RegionID,
-					InstanceSpec: item.InstanceSpec,
-					Items:        []BillingItem{},
-					TotalAmount:  0,
-				}
-				instanceBillings[item.InstanceID] = summary
-			}
-
-			// Update InstanceSpec if not set
-			if summary.InstanceSpec == "" && item.InstanceSpec != "" {
-				summary.InstanceSpec = item.InstanceSpec
-			}
-
-			// Format billing item name with InstanceSpec for compute resources
-			billingItemName := formatBillingItemName(item.BillingItem, item.InstanceSpec)
-
-			billingItem := BillingItem{
-				InstanceID:      item.InstanceID,
-				InstanceName:    instInfo.InstanceName,
-				Region:          instInfo.RegionID,
-				ProductCode:     item.ProductCode,
-				ProductDetail:   item.ProductDetail,
-				BillingItemName: billingItemName,
-				InstanceSpec:    item.InstanceSpec,
-				PretaxAmount:    item.PretaxAmount,
-				Currency:        item.Currency,
-			}
-
-			summary.Items = append(summary.Items, billingItem)
-			summary.TotalAmount += item.PretaxAmount
-		}
+	response, err := c.client.QueryInstanceBill(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query instance bill for cycle %s: %w", cycle, err)
 	}
+
+	log.Debugf("Got %d billing items from API for cycle %s", len(response.Data.Items.Item), cycle)
+
+	for _, item := range response.Data.Items.Item {
+		// Skip if not in our instance list
+		instInfo, exists := instanceMap[item.InstanceID]
+		if !exists {
+			continue
+		}
+
+		// Debug log to see actual API response fields
+		log.Debugf("Billing item: InstanceID=%s, InstanceSpec=%s, BillingItem=%s, ServicePeriod=%s, PretaxAmount=%.4f",
+			item.InstanceID, item.InstanceSpec, item.BillingItem, item.ServicePeriod, item.PretaxAmount)
+
+		summary, exists := instanceBillings[item.InstanceID]
+		if !exists {
+			summary = &InstanceBillingSummary{
+				InstanceID:   item.InstanceID,
+				InstanceName: instInfo.InstanceName,
+				Region:       instInfo.RegionID,
+				InstanceSpec: item.InstanceSpec,
+				Items:        []BillingItem{},
+				TotalAmount:  0,
+			}
+			instanceBillings[item.InstanceID] = summary
+		}
+
+		// Update InstanceSpec if not set
+		if summary.InstanceSpec == "" && item.InstanceSpec != "" {
+			summary.InstanceSpec = item.InstanceSpec
+		}
+
+		// Parse ServicePeriod for running time calculation
+		// Only count once per instance (avoid duplicate counting from multiple billing items)
+		// Note: Only count instances with ServicePeriodUnit "秒" (seconds) for spot instances
+		// Instances with "天" (days) are typically prepaid/subscription instances
+		if item.ServicePeriod != "" && item.ServicePeriodUnit == "秒" {
+			if seconds, err := parseServicePeriod(item.ServicePeriod, item.ServicePeriodUnit); err == nil {
+				// Only update if this is a larger value (in case different billing items have different periods)
+				if seconds > instanceRunningSeconds[item.InstanceID] {
+					instanceRunningSeconds[item.InstanceID] = seconds
+				}
+			}
+		}
+
+		// Format billing item name with InstanceSpec for compute resources
+		billingItemName := formatBillingItemName(item.BillingItem, item.InstanceSpec)
+
+		billingItem := BillingItem{
+			InstanceID:      item.InstanceID,
+			InstanceName:    instInfo.InstanceName,
+			Region:          instInfo.RegionID,
+			ProductCode:     item.ProductCode,
+			ProductDetail:   item.ProductDetail,
+			BillingItemName: billingItemName,
+			InstanceSpec:    item.InstanceSpec,
+			PretaxAmount:    item.PretaxAmount,
+			Currency:        item.Currency,
+		}
+
+		summary.Items = append(summary.Items, billingItem)
+		summary.TotalAmount += item.PretaxAmount
+	}
+
+	// Calculate total running seconds from per-instance data (deduplicated)
+	var totalRunningSeconds float64
+	for _, seconds := range instanceRunningSeconds {
+		totalRunningSeconds += seconds
+	}
+	
+	// Calculate elapsed days this month
+	elapsedDays := now.Day()
+	totalRunningHours := totalRunningSeconds / 3600
 
 	// Build final summary
 	result := &BillingSummary{
-		StartTime:   startTime,
-		EndTime:     now,
-		Hours:       hours,
-		Instances:   make([]InstanceBillingSummary, 0, len(instanceBillings)),
-		TotalAmount: 0,
+		StartTime:         startTime,
+		EndTime:           now,
+		BillingCycle:      cycle,
+		ElapsedDays:       elapsedDays,
+		TotalRunningHours: totalRunningHours,
+		Instances:         make([]InstanceBillingSummary, 0, len(instanceBillings)),
+		TotalAmount:       0,
 	}
 
-	for _, summary := range instanceBillings {
+	for id, summary := range instanceBillings {
+		// Set running hours and calculate hourly cost for each instance
+		if seconds, ok := instanceRunningSeconds[id]; ok && seconds > 0 {
+			summary.RunningHours = seconds / 3600
+			if summary.TotalAmount > 0 {
+				summary.HourlyCost = summary.TotalAmount / summary.RunningHours
+			}
+		}
 		result.Instances = append(result.Instances, *summary)
 		result.TotalAmount += summary.TotalAmount
 	}
 
-	// Calculate monthly estimate based on hourly rate
-	if hours > 0 && result.TotalAmount > 0 {
-		hourlyRate := result.TotalAmount / float64(hours)
-		result.MonthlyEstimate = hourlyRate * 24 * 30 // 30 days per month
+	// Calculate monthly estimate based on sum of per-instance hourly costs
+	// This assumes all instances run 24/7 for a full month
+	var totalHourlyCost float64
+	for _, inst := range result.Instances {
+		if inst.HourlyCost > 0 {
+			totalHourlyCost += inst.HourlyCost
+		}
+	}
+	
+	if totalHourlyCost > 0 {
+		// Sum of all instance hourly costs × 720 hours
+		result.MonthlyEstimate = totalHourlyCost * 30 * 24
+		result.EstimateMethod = fmt.Sprintf("按每小时费用总和: ¥%.4f/小时 × 720小时", totalHourlyCost)
+	} else if result.TotalAmount > 0 {
+		// Fallback: use elapsed days this month
+		if elapsedDays > 0 {
+			dailyRate := result.TotalAmount / float64(elapsedDays)
+			result.MonthlyEstimate = dailyRate * 30
+			result.EstimateMethod = fmt.Sprintf("按已过天数: ¥%.4f/天 × 30天", dailyRate)
+		}
 	}
 
-	log.Infof("Found billing for %d instances in last %d hours, total: %.4f, monthly estimate: %.2f",
-		len(result.Instances), hours, result.TotalAmount, result.MonthlyEstimate)
+	log.Infof("Found billing for %d instances, total: %.4f, running hours: %.2f, monthly estimate: %.2f",
+		len(result.Instances), result.TotalAmount, totalRunningHours, result.MonthlyEstimate)
 
 	return result, nil
 }
 
-// getBillingCycles returns the billing cycles (YYYY-MM) that cover the time range
-func getBillingCycles(start, end time.Time) []string {
-	cycles := make([]string, 0)
-	current := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, start.Location())
-
-	for !current.After(end) {
-		cycles = append(cycles, current.Format("2006-01"))
-		current = current.AddDate(0, 1, 0)
-	}
-
-	return cycles
+// QueryBillingByHours is deprecated, use QueryBilling instead
+// Kept for backward compatibility
+func (c *BillingClient) QueryBillingByHours(instances []InstanceInfo, hours int) (*BillingSummary, error) {
+	return c.QueryBilling(instances)
 }
 
-// isBillingInTimeRange checks if a billing item falls within the specified time range
-func isBillingInTimeRange(servicePeriod, billingDate string, start, end time.Time) bool {
-	// Try to parse ServicePeriod first (format: "yyyyMMddHHmmss-yyyyMMddHHmmss")
-	if servicePeriod != "" && len(servicePeriod) >= 14 {
-		// Extract start time from ServicePeriod
-		periodStart := servicePeriod[:14]
-		t, err := time.ParseInLocation("20060102150405", periodStart, start.Location())
-		if err == nil {
-			return !t.Before(start) && !t.After(end)
-		}
+// parseServicePeriod parses ServicePeriod string and converts to seconds based on unit
+func parseServicePeriod(servicePeriod, unit string) (float64, error) {
+	var value float64
+	_, err := fmt.Sscanf(servicePeriod, "%f", &value)
+	if err != nil {
+		return 0, err
 	}
-
-	// Fall back to BillingDate (format: "2006-01-02")
-	if billingDate != "" {
-		t, err := time.ParseInLocation("2006-01-02", billingDate, start.Location())
-		if err == nil {
-			// For daily billing, check if the date is within range
-			dayStart := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-			dayEnd := dayStart.Add(24 * time.Hour)
-			return !dayEnd.Before(start) && !dayStart.After(end)
-		}
+	
+	// Convert to seconds based on unit
+	switch unit {
+	case "天":
+		return value * 24 * 3600, nil // days to seconds
+	case "小时":
+		return value * 3600, nil // hours to seconds
+	case "秒", "":
+		return value, nil // already in seconds
+	default:
+		// Assume seconds if unknown unit
+		return value, nil
 	}
+}
 
-	// If we can't parse the time, include the item (conservative approach)
-	return true
+// parseServicePeriodSeconds parses ServicePeriod string as seconds (deprecated, use parseServicePeriod)
+func parseServicePeriodSeconds(servicePeriod string) (float64, error) {
+	var seconds float64
+	_, err := fmt.Sscanf(servicePeriod, "%f", &seconds)
+	return seconds, err
 }
 
 // formatBillingItemName formats the billing item name for display

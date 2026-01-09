@@ -33,9 +33,6 @@ type Config struct {
 	HealthCheckTimeout  int // seconds
 	HealthCheckInterval int // seconds
 
-	// Billing query settings
-	BillingHours int // Hours of billing data to query, default 24
-
 	// Logging
 	LogLevel string
 	LogFile  string
@@ -67,9 +64,6 @@ func Load() (*Config, error) {
 		HealthCheckEnabled:  getEnvBool("HEALTH_CHECK_ENABLED", true),
 		HealthCheckTimeout:  getEnvInt("HEALTH_CHECK_TIMEOUT", 300),
 		HealthCheckInterval: getEnvInt("HEALTH_CHECK_INTERVAL", 10),
-
-		// Billing query settings
-		BillingHours: getEnvInt("BILLING_HOURS", 24),
 
 		// Logging
 		LogLevel: getEnvString("LOG_LEVEL", "info"),

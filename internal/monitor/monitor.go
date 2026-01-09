@@ -71,7 +71,7 @@ func (m *Monitor) StartBot() {
 func (m *Monitor) handleBotCommand(command string) error {
 	switch command {
 	case "billing", "cost", "fee":
-		return m.SendBillingReport(m.cfg.BillingHours)
+		return m.SendBillingReport()
 	case "status":
 		return m.sendStatusReport()
 	case "help":
@@ -129,15 +129,15 @@ func (m *Monitor) sendHelpMessage() error {
 		return fmt.Errorf("telegram notifier not initialized")
 	}
 
-	message := fmt.Sprintf(`🤖 <b>可用命令</b>
+	message := `🤖 <b>可用命令</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
-/billing - 查询扣费汇总（最近%d小时）
+/billing - 查询本月扣费汇总
 /status - 查看实例状态
 /help - 显示帮助信息
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-<i>别名: /cost, /fee</i>`, m.cfg.BillingHours)
+<i>别名: /cost, /fee</i>`
 
 	return m.notifier.Send(message)
 }
@@ -318,8 +318,8 @@ func (m *Monitor) updateNotifyTime(instanceID string) {
 	m.lastNotify[instanceID] = time.Now()
 }
 
-// SendBillingReport sends a billing report for the specified hours
-func (m *Monitor) SendBillingReport(hours int) error {
+// SendBillingReport sends a billing report for the current month
+func (m *Monitor) SendBillingReport() error {
 	if m.billingClient == nil {
 		return fmt.Errorf("billing client not initialized")
 	}
@@ -345,20 +345,20 @@ func (m *Monitor) SendBillingReport(hours int) error {
 		return nil
 	}
 
-	log.Infof("Querying billing for %d instances (last %d hours)...", len(instanceInfos), hours)
+	log.Infof("Querying billing for %d instances...", len(instanceInfos))
 
-	// Query billing by hours
-	summary, err := m.billingClient.QueryBillingByHours(instanceInfos, hours)
+	// Query billing for current month
+	summary, err := m.billingClient.QueryBilling(instanceInfos)
 	if err != nil {
 		return fmt.Errorf("failed to query billing: %w", err)
 	}
 
-	// Send notification with hours and monthly estimate
+	// Send notification
 	if err := m.notifier.NotifyBillingSummary(summary); err != nil {
 		return fmt.Errorf("failed to send billing notification: %w", err)
 	}
 
-	log.Infof("Billing report sent successfully (last %d hours, total: ¥%.4f, monthly estimate: ¥%.2f)",
-		hours, summary.TotalAmount, summary.MonthlyEstimate)
+	log.Infof("Billing report sent successfully (total: ¥%.4f, monthly estimate: ¥%.2f)",
+		summary.TotalAmount, summary.MonthlyEstimate)
 	return nil
 }

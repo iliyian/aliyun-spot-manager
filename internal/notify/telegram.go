@@ -171,25 +171,30 @@ func (t *TelegramNotifier) NotifyMonitorStarted(instanceCount int, instances []s
 	return t.Send(message)
 }
 
-// NotifyBillingSummary sends a billing summary notification with hours and monthly estimate
+// NotifyBillingSummary sends a billing summary notification with monthly data and estimate
 func (t *TelegramNotifier) NotifyBillingSummary(summary *aliyun.BillingSummary) error {
 	if summary == nil || len(summary.Instances) == 0 {
-		message := fmt.Sprintf(`📊 <b>扣费汇总</b> (最近 %d 小时)
+		message := fmt.Sprintf(`📊 <b>扣费汇总</b> (%s)
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
 暂无扣费记录
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-💰 总计: ¥0.00
-📈 月度估算: ¥0.00`, summary.Hours)
+💰 本月累计: ¥0.00
+📈 月度估算: ¥0.00`, summary.BillingCycle)
 		return t.Send(message)
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📊 <b>扣费汇总</b> (最近 %d 小时)\n", summary.Hours))
-	sb.WriteString(fmt.Sprintf("⏰ %s ~ %s\n",
-		summary.StartTime.Format("01-02 15:04"),
-		summary.EndTime.Format("01-02 15:04")))
+	sb.WriteString(fmt.Sprintf("📊 <b>扣费汇总</b> (%s)\n", summary.BillingCycle))
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	
+	// Statistics section
+	sb.WriteString(fmt.Sprintf("📅 统计区间: %s 01日 ~ %s\n",
+		summary.BillingCycle,
+		summary.EndTime.Format("02日 15:04")))
+	sb.WriteString(fmt.Sprintf("⏱ 已过天数: %d 天\n", summary.ElapsedDays))
+	sb.WriteString(fmt.Sprintf("🕐 总运行时长: %.1f 小时\n", summary.TotalRunningHours))
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
 
 	for _, inst := range summary.Instances {
@@ -210,13 +215,22 @@ func (t *TelegramNotifier) NotifyBillingSummary(summary *aliyun.BillingSummary) 
 			sb.WriteString(fmt.Sprintf("   %s %s: ¥%.4f\n", prefix, item.BillingItemName, item.PretaxAmount))
 		}
 
-		// Instance subtotal
-		sb.WriteString(fmt.Sprintf("   <b>小计: ¥%.4f</b>\n\n", inst.TotalAmount))
+		// Instance subtotal with hourly cost
+		if inst.RunningHours > 0 && inst.HourlyCost > 0 {
+			sb.WriteString(fmt.Sprintf("   <b>小计: ¥%.4f</b> (%.1fh, ¥%.4f/h)\n\n", inst.TotalAmount, inst.RunningHours, inst.HourlyCost))
+		} else {
+			sb.WriteString(fmt.Sprintf("   <b>小计: ¥%.4f</b>\n\n", inst.TotalAmount))
+		}
 	}
 
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	sb.WriteString(fmt.Sprintf("💰 <b>%d小时总计: ¥%.4f</b>\n", summary.Hours, summary.TotalAmount))
-	sb.WriteString(fmt.Sprintf("📈 <b>月度估算: ¥%.2f</b>", summary.MonthlyEstimate))
+	sb.WriteString(fmt.Sprintf("💰 <b>本月累计: ¥%.4f</b>\n", summary.TotalAmount))
+	sb.WriteString(fmt.Sprintf("📈 <b>月度估算: ¥%.2f</b>\n", summary.MonthlyEstimate))
+	
+	// Show calculation method
+	if summary.EstimateMethod != "" {
+		sb.WriteString(fmt.Sprintf("📝 <i>%s</i>", summary.EstimateMethod))
+	}
 
 	return t.Send(sb.String())
 }
