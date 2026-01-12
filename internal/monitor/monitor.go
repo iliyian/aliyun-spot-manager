@@ -17,6 +17,7 @@ type Monitor struct {
 	cfg           *config.Config
 	ecsClient     *aliyun.ECSClient
 	billingClient *aliyun.BillingClient
+	trafficClient *aliyun.TrafficClient
 	notifier      *notify.TelegramNotifier
 	botHandler    *notify.BotHandler
 
@@ -51,6 +52,16 @@ func New(cfg *config.Config) (*Monitor, error) {
 		}
 	}
 
+	// Initialize traffic client for bot commands
+	if cfg.TelegramEnabled {
+		trafficClient, err := aliyun.NewTrafficClient(cfg.AliyunAccessKeyID, cfg.AliyunAccessKeySecret)
+		if err != nil {
+			log.Warnf("Failed to create traffic client: %v", err)
+		} else {
+			m.trafficClient = trafficClient
+		}
+	}
+
 	// Initialize bot handler for commands
 	if cfg.TelegramEnabled {
 		m.botHandler = notify.NewBotHandler(cfg.TelegramBotToken, cfg.TelegramChatID)
@@ -72,6 +83,8 @@ func (m *Monitor) handleBotCommand(command string) error {
 	switch command {
 	case "billing", "cost", "fee":
 		return m.SendBillingReport()
+	case "traffic", "flow", "bandwidth":
+		return m.SendTrafficReport()
 	case "status":
 		return m.sendStatusReport()
 	case "help":
@@ -133,11 +146,12 @@ func (m *Monitor) sendHelpMessage() error {
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
 /billing - 查询本月扣费汇总
+/traffic - 查询本月流量统计
 /status - 查看实例状态
 /help - 显示帮助信息
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-<i>别名: /cost, /fee</i>`
+━━━━━━━━━━━━━━━━
+<i>别名: /cost, /fee, /flow, /bandwidth</i>`
 
 	return m.notifier.Send(message)
 }
@@ -360,5 +374,33 @@ func (m *Monitor) SendBillingReport() error {
 
 	log.Infof("Billing report sent successfully (total: ¥%.4f, monthly estimate: ¥%.2f)",
 		summary.TotalAmount, summary.MonthlyEstimate)
+	return nil
+}
+
+// SendTrafficReport sends a traffic report for the current month
+func (m *Monitor) SendTrafficReport() error {
+	if m.trafficClient == nil {
+		return fmt.Errorf("traffic client not initialized")
+	}
+
+	if m.notifier == nil {
+		return fmt.Errorf("telegram notifier not initialized")
+	}
+
+	log.Info("Querying traffic data...")
+
+	// Query traffic for current month
+	summary, err := m.trafficClient.QueryInternetTraffic()
+	if err != nil {
+		return fmt.Errorf("failed to query traffic: %w", err)
+	}
+
+	// Send notification
+	if err := m.notifier.NotifyTrafficSummary(summary); err != nil {
+		return fmt.Errorf("failed to send traffic notification: %w", err)
+	}
+
+	log.Infof("Traffic report sent successfully (total: %.2f GB, China: %.2f GB, Non-China: %.2f GB)",
+		summary.TotalTrafficGB, summary.ChinaMainland.TrafficGB, summary.NonChinaMainland.TrafficGB)
 	return nil
 }

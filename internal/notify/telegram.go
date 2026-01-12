@@ -234,3 +234,94 @@ func (t *TelegramNotifier) NotifyBillingSummary(summary *aliyun.BillingSummary) 
 
 	return t.Send(sb.String())
 }
+
+// NotifyTrafficSummary sends a traffic summary notification
+func (t *TelegramNotifier) NotifyTrafficSummary(summary *aliyun.TrafficSummary) error {
+	if summary == nil {
+		message := `📶 <b>流量统计</b>
+━━━━━━━━
+
+暂无流量数据
+
+━━━━━━━━━━━━━━━━`
+		return t.Send(message)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📶 <b>流量统计</b> (%s)\n", summary.BillingCycle))
+	sb.WriteString("━━━━━━━━━━━━━━━━\n")
+	
+	// Statistics section
+	sb.WriteString(fmt.Sprintf("📅 统计区间: %s 01日 ~ %s\n",
+		summary.BillingCycle,
+		summary.EndTime.Format("02日 15:04")))
+	sb.WriteString("━━━━━━━━━━━━━━━━\n\n")
+
+	// China Mainland section
+	sb.WriteString("🇨🇳 <b>中国大陆</b>\n")
+	if summary.ChinaMainland.Traffic > 0 {
+		sb.WriteString(fmt.Sprintf("   📊 总流量: <b>%s</b>\n", aliyun.FormatTrafficSize(summary.ChinaMainland.Traffic)))
+		sb.WriteString(fmt.Sprintf("   🌐 区域数: %d\n", summary.ChinaMainland.RegionCount))
+		// Product details
+		if len(summary.ChinaMainland.ProductDetails) > 0 {
+			sb.WriteString("   📦 产品明细:\n")
+			for product, traffic := range summary.ChinaMainland.ProductDetails {
+				if traffic > 0 {
+					sb.WriteString(fmt.Sprintf("      • %s: %s\n", product, aliyun.FormatTrafficSize(traffic)))
+				}
+			}
+		}
+		// Region list
+		if len(summary.ChinaMainland.Regions) > 0 {
+			sb.WriteString("   📍 区域列表:\n")
+			for _, region := range summary.ChinaMainland.Regions {
+				regionName := aliyun.GetRegionDisplayName(region)
+				sb.WriteString(fmt.Sprintf("      • %s\n", regionName))
+			}
+		}
+	} else {
+		sb.WriteString("   暂无流量\n")
+	}
+	sb.WriteString("\n")
+
+	// Non-China Mainland section
+	sb.WriteString("🌏 <b>非中国大陆</b>\n")
+	if summary.NonChinaMainland.Traffic > 0 {
+		sb.WriteString(fmt.Sprintf("   📊 总流量: <b>%s</b>\n", aliyun.FormatTrafficSize(summary.NonChinaMainland.Traffic)))
+		sb.WriteString(fmt.Sprintf("   🌐 区域数: %d\n", summary.NonChinaMainland.RegionCount))
+		// Product details
+		if len(summary.NonChinaMainland.ProductDetails) > 0 {
+			sb.WriteString("   📦 产品明细:\n")
+			for product, traffic := range summary.NonChinaMainland.ProductDetails {
+				if traffic > 0 {
+					sb.WriteString(fmt.Sprintf("      • %s: %s\n", product, aliyun.FormatTrafficSize(traffic)))
+				}
+			}
+		}
+		// Region list with traffic details
+		if len(summary.RegionDetails) > 0 {
+			sb.WriteString("   📍 区域明细:\n")
+			for _, detail := range summary.RegionDetails {
+				if !aliyun.IsChinaMainlandRegion(detail.BusinessRegionId) && detail.Traffic > 0 {
+					regionName := aliyun.GetRegionDisplayName(detail.BusinessRegionId)
+					sb.WriteString(fmt.Sprintf("      • %s: %s\n", regionName, aliyun.FormatTrafficSize(detail.Traffic)))
+				}
+			}
+		}
+	} else {
+		sb.WriteString("   暂无流量\n")
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("━━━━━━━━━━━━━━━━\n")
+	sb.WriteString(fmt.Sprintf("📈 <b>本月总流量: %s</b>\n", aliyun.FormatTrafficSize(summary.TotalTraffic)))
+	
+	// Show percentage breakdown
+	if summary.TotalTraffic > 0 {
+		chinaPercent := float64(summary.ChinaMainland.Traffic) / float64(summary.TotalTraffic) * 100
+		nonChinaPercent := float64(summary.NonChinaMainland.Traffic) / float64(summary.TotalTraffic) * 100
+		sb.WriteString(fmt.Sprintf("📊 中国大陆: %.1f%% | 非中国大陆: %.1f%%", chinaPercent, nonChinaPercent))
+	}
+
+	return t.Send(sb.String())
+}
