@@ -5,8 +5,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/iliyian/aliyun-spot-autoopen/internal/config"
-	"github.com/iliyian/aliyun-spot-autoopen/internal/monitor"
+	"github.com/iliyian/aliyun-spot-manager/internal/config"
+	"github.com/iliyian/aliyun-spot-manager/internal/monitor"
 	"github.com/joho/godotenv"
 	"github.com/robfig/cron/v3"
 	log "github.com/sirupsen/logrus"

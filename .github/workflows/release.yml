@@ -45,13 +45,13 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          go build -ldflags="-s -w" -o aliyun-spot-autoopen-${{ matrix.suffix }}
+          go build -ldflags="-s -w" -o aliyun-spot-manager-${{ matrix.suffix }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aliyun-spot-autoopen-${{ matrix.suffix }}
-          path: aliyun-spot-autoopen-${{ matrix.suffix }}
+          name: aliyun-spot-manager-${{ matrix.suffix }}
+          path: aliyun-spot-manager-${{ matrix.suffix }}
 
   release:
     name: Release

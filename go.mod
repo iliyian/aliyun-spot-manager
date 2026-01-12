@@ -1,4 +1,4 @@
-module github.com/iliyian/aliyun-spot-autoopen
+module github.com/iliyian/aliyun-spot-manager
 
 go 1.21
 

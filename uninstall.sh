@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Config
-INSTALL_DIR="/opt/aliyun-spot-autoopen"
+INSTALL_DIR="/opt/aliyun-spot-manager"
 SERVICE_NAME="aliyun-spot"
 
 echo -e "${RED}========================================${NC}"

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iliyian/aliyun-spot-autoopen/internal/aliyun"
+	"github.com/iliyian/aliyun-spot-manager/internal/aliyun"
 )
 
 // TelegramNotifier sends notifications via Telegram

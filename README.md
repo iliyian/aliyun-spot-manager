@@ -1,28 +1,28 @@
-# Aliyun Spot Instance Auto-Start Monitor
+# Aliyun Spot Instance Manager
 
 阿里云抢占式实例自动检测和开机工具。自动监控所有区域的抢占式实例，当实例被回收（停止）时自动重新启动，并通过 Telegram 发送通知。
 
 ## 🚀 一键安装
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/iliyian/aliyun-spot-autoopen/main/install.sh)"
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/iliyian/aliyun-spot-manager/main/install.sh)"
 ```
 
 ## 🔄 一键升级
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/iliyian/aliyun-spot-autoopen/main/install.sh)" -- upgrade
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/iliyian/aliyun-spot-manager/main/install.sh)" -- upgrade
 ```
 
 或者在已安装的服务器上：
 ```bash
-sudo /opt/aliyun-spot-autoopen/install.sh upgrade
+sudo /opt/aliyun-spot-manager/install.sh upgrade
 ```
 
 安装完成后，编辑配置文件并启动服务：
 ```bash
 # 编辑配置
-sudo vim /opt/aliyun-spot-autoopen/.env
+sudo vim /opt/aliyun-spot-manager/.env
 
 # 启动服务
 sudo systemctl start aliyun-spot
@@ -37,7 +37,7 @@ sudo journalctl -u aliyun-spot -f
 ## 🗑️ 一键卸载
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/iliyian/aliyun-spot-autoopen/main/uninstall.sh)"
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/iliyian/aliyun-spot-manager/main/uninstall.sh)"
 ```
 
 ## 功能特性
@@ -119,19 +119,19 @@ TELEGRAM_CHAT_ID=your-chat-id
 go mod tidy
 
 # 编译
-go build -o aliyun-spot-autoopen
+go build -o aliyun-spot-manager
 
 # 运行
-./aliyun-spot-autoopen
+./aliyun-spot-manager
 ```
 
 **交叉编译（Windows 编译 Linux 版本）：**
 ```bash
 # Linux AMD64
-GOOS=linux GOARCH=amd64 go build -o aliyun-spot-autoopen-linux-amd64
+GOOS=linux GOARCH=amd64 go build -o aliyun-spot-manager-linux-amd64
 
 # Linux ARM64
-GOOS=linux GOARCH=arm64 go build -o aliyun-spot-autoopen-linux-arm64
+GOOS=linux GOARCH=arm64 go build -o aliyun-spot-manager-linux-arm64
 ```
 
 ## 部署到服务器
@@ -140,12 +140,12 @@ GOOS=linux GOARCH=arm64 go build -o aliyun-spot-autoopen-linux-arm64
 
 ```bash
 # 1. 创建目录
-sudo mkdir -p /opt/aliyun-spot-autoopen
+sudo mkdir -p /opt/aliyun-spot-manager
 
 # 2. 上传文件
-sudo cp aliyun-spot-autoopen /opt/aliyun-spot-autoopen/
-sudo cp .env /opt/aliyun-spot-autoopen/
-sudo chmod +x /opt/aliyun-spot-autoopen/aliyun-spot-autoopen
+sudo cp aliyun-spot-manager /opt/aliyun-spot-manager/
+sudo cp .env /opt/aliyun-spot-manager/
+sudo chmod +x /opt/aliyun-spot-manager
 
 # 3. 安装服务
 sudo cp deploy/aliyun-spot.service /etc/systemd/system/
@@ -168,24 +168,24 @@ sudo journalctl -u aliyun-spot -f
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
 COPY . .
-RUN go mod tidy && go build -o aliyun-spot-autoopen
+RUN go mod tidy && go build -o aliyun-spot-manager
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /app
-COPY --from=builder /app/aliyun-spot-autoopen .
-CMD ["./aliyun-spot-autoopen"]
+COPY --from=builder /app/aliyun-spot-manager .
+CMD ["./aliyun-spot-manager"]
 ```
 
 ```bash
 # 构建镜像
-docker build -t aliyun-spot-autoopen .
+docker build -t aliyun-spot-manager .
 
 # 运行容器
 docker run -d --name aliyun-spot \
   --env-file .env \
   --restart always \
-  aliyun-spot-autoopen
+  aliyun-spot-manager
 ```
 
 ## 配置说明

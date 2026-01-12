@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-aliyun-spot-autoopen
+aliyun-spot-manager
 
 # Test binary
 *.test

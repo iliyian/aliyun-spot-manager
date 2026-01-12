@@ -8,8 +8,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Config
-REPO="iliyian/aliyun-spot-autoopen"
-INSTALL_DIR="/opt/aliyun-spot-autoopen"
+REPO="iliyian/aliyun-spot-manager"
+INSTALL_DIR="/opt/aliyun-spot-manager"
 SERVICE_NAME="aliyun-spot"
 
 # Check root
@@ -31,7 +31,7 @@ do_upgrade() {
     echo
 
     # Check if installed
-    if [ ! -f "$INSTALL_DIR/aliyun-spot-autoopen" ]; then
+    if [ ! -f "$INSTALL_DIR/aliyun-spot-manager" ]; then
         echo -e "${RED}程序未安装，请先运行安装脚本${NC}"
         exit 1
     fi
@@ -55,10 +55,10 @@ do_upgrade() {
 
     case $OS in
         linux)
-            BINARY="aliyun-spot-autoopen-linux-$ARCH"
+            BINARY="aliyun-spot-manager-linux-$ARCH"
             ;;
         darwin)
-            BINARY="aliyun-spot-autoopen-darwin-$ARCH"
+            BINARY="aliyun-spot-manager-darwin-$ARCH"
             ;;
         *)
             echo -e "${RED}不支持的操作系统: $OS${NC}"
@@ -81,15 +81,15 @@ do_upgrade() {
     # Download new binary
     echo -e "${GREEN}[2/4] 下载新版本...${NC}"
     DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_VERSION/$BINARY"
-    curl -L -o /tmp/aliyun-spot-autoopen-new "$DOWNLOAD_URL"
-    chmod +x /tmp/aliyun-spot-autoopen-new
+    curl -L -o /tmp/aliyun-spot-manager-new "$DOWNLOAD_URL"
+    chmod +x /tmp/aliyun-spot-manager-new
 
     # Stop service
     echo -e "${GREEN}[3/4] 停止服务...${NC}"
     systemctl stop $SERVICE_NAME 2>/dev/null || true
 
     # Replace binary
-    mv /tmp/aliyun-spot-autoopen-new $INSTALL_DIR/aliyun-spot-autoopen
+    mv /tmp/aliyun-spot-manager-new $INSTALL_DIR/aliyun-spot-manager
 
     # Start service
     echo -e "${GREEN}[4/4] 启动服务...${NC}"
@@ -143,10 +143,10 @@ esac
 
 case $OS in
     linux)
-        BINARY="aliyun-spot-autoopen-linux-$ARCH"
+        BINARY="aliyun-spot-manager-linux-$ARCH"
         ;;
     darwin)
-        BINARY="aliyun-spot-autoopen-darwin-$ARCH"
+        BINARY="aliyun-spot-manager-darwin-$ARCH"
         ;;
     *)
         echo -e "${RED}不支持的操作系统: $OS${NC}"
@@ -175,8 +175,8 @@ cd $INSTALL_DIR
 # Download binary
 echo -e "${GREEN}[3/5] 下载程序...${NC}"
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_VERSION/$BINARY"
-curl -L -o aliyun-spot-autoopen "$DOWNLOAD_URL"
-chmod +x aliyun-spot-autoopen
+curl -L -o aliyun-spot-manager "$DOWNLOAD_URL"
+chmod +x aliyun-spot-manager
 
 # Download config template
 echo -e "${GREEN}[4/5] 下载配置模板...${NC}"
@@ -200,7 +200,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/aliyun-spot-autoopen
+ExecStart=$INSTALL_DIR/aliyun-spot-manager
 Restart=always
 RestartSec=10
 EnvironmentFile=$INSTALL_DIR/.env

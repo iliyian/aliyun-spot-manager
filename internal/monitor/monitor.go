@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iliyian/aliyun-spot-autoopen/internal/aliyun"
-	"github.com/iliyian/aliyun-spot-autoopen/internal/config"
-	"github.com/iliyian/aliyun-spot-autoopen/internal/notify"
+	"github.com/iliyian/aliyun-spot-manager/internal/aliyun"
+	"github.com/iliyian/aliyun-spot-manager/internal/config"
+	"github.com/iliyian/aliyun-spot-manager/internal/notify"
 	log "github.com/sirupsen/logrus"
 )
 
