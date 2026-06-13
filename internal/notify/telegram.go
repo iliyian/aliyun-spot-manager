@@ -242,19 +242,39 @@ func (t *TelegramNotifier) NotifyBillingSummary(summary *aliyun.BillingSummary) 
 			if i == len(inst.Items)-1 {
 				prefix = "└─"
 			}
-			sb.WriteString(fmt.Sprintf("   %s %s: ¥%.4f\n", prefix, item.BillingItemName, item.PretaxAmount))
+			// 显示实际费用，有抵扣时标出抵扣金额
+			if item.DeductedByCoupons > 0 {
+				actualItem := item.PretaxAmount + item.DeductedByCoupons
+				sb.WriteString(fmt.Sprintf("   %s %s: ¥%.4f (抵用券抵扣 ¥%.4f)\n", prefix, item.BillingItemName, actualItem, item.DeductedByCoupons))
+			} else {
+				sb.WriteString(fmt.Sprintf("   %s %s: ¥%.4f\n", prefix, item.BillingItemName, item.PretaxAmount))
+			}
 		}
 
 		// Instance subtotal with hourly cost
 		if inst.RunningHours > 0 && inst.HourlyCost > 0 {
-			sb.WriteString(fmt.Sprintf("   <b>小计: ¥%.4f</b> (%.1fh, ¥%.4f/h)\n\n", inst.TotalAmount, inst.RunningHours, inst.HourlyCost))
+			if inst.TotalDeductions > 0 {
+				sb.WriteString(fmt.Sprintf("   <b>小计: ¥%.4f</b> (现金 ¥%.4f, 抵用券 ¥%.4f, %.1fh, ¥%.4f/h)\n\n",
+					inst.TotalAmount, inst.TotalCashAmount, inst.TotalDeductions, inst.RunningHours, inst.HourlyCost))
+			} else {
+				sb.WriteString(fmt.Sprintf("   <b>小计: ¥%.4f</b> (%.1fh, ¥%.4f/h)\n\n", inst.TotalAmount, inst.RunningHours, inst.HourlyCost))
+			}
 		} else {
-			sb.WriteString(fmt.Sprintf("   <b>小计: ¥%.4f</b>\n\n", inst.TotalAmount))
+			if inst.TotalDeductions > 0 {
+				sb.WriteString(fmt.Sprintf("   <b>小计: ¥%.4f</b> (现金 ¥%.4f, 抵用券 ¥%.4f)\n\n",
+					inst.TotalAmount, inst.TotalCashAmount, inst.TotalDeductions))
+			} else {
+				sb.WriteString(fmt.Sprintf("   <b>小计: ¥%.4f</b>\n\n", inst.TotalAmount))
+			}
 		}
 	}
 
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━\n")
 	sb.WriteString(fmt.Sprintf("💰 <b>本月累计: ¥%.4f</b>\n", summary.TotalAmount))
+	if summary.TotalDeductions > 0 {
+		sb.WriteString(fmt.Sprintf("💵 现金支付: ¥%.4f | 🎫 抵用券抵扣: ¥%.4f\n",
+			summary.TotalCashAmount, summary.TotalDeductions))
+	}
 	sb.WriteString(fmt.Sprintf("📈 <b>月度估算: ¥%.2f</b>\n", summary.MonthlyEstimate))
 
 	// Show calculation method

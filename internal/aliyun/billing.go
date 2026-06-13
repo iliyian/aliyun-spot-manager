@@ -11,28 +11,32 @@ import (
 
 // BillingItem represents a billing item for an instance
 type BillingItem struct {
-	InstanceID      string  // 实例ID
-	InstanceName    string  // 实例名称 (ProductDetail)
-	Region          string  // 区域
-	ProductCode     string  // 产品代码 (ecs)
-	ProductDetail   string  // 产品明细
-	BillingItemName string  // 计费项名称 (实例规格、系统盘、数据盘、公网带宽等)
-	InstanceSpec    string  // 实例规格 (ecs.t6-c4m1.large)
-	PretaxAmount    float64 // 应付金额
-	Currency        string  // 货币单位
+	InstanceID         string  // 实例ID
+	InstanceName       string  // 实例名称 (ProductDetail)
+	Region             string  // 区域
+	ProductCode        string  // 产品代码 (ecs)
+	ProductDetail      string  // 产品明细
+	BillingItemName    string  // 计费项名称 (实例规格、系统盘、数据盘、公网带宽等)
+	InstanceSpec       string  // 实例规格 (ecs.t6-c4m1.large)
+	PretaxAmount       float64 // 应付金额
+	CashAmount         float64 // 现金支付
+	DeductedByCoupons  float64 // 抵用券/代金券抵扣
+	Currency           string  // 货币单位
 }
 
 // InstanceBillingSummary represents billing summary for a single instance
 type InstanceBillingSummary struct {
-	InstanceID   string
-	InstanceName string
-	Region       string
-	AccountLabel string
-	InstanceSpec string  // 实例规格
-	Items        []BillingItem
-	TotalAmount  float64
-	RunningHours float64 // 运行小时数
-	HourlyCost   float64 // 平均每小时费用
+	InstanceID      string
+	InstanceName    string
+	Region          string
+	AccountLabel    string
+	InstanceSpec    string  // 实例规格
+	Items           []BillingItem
+	TotalAmount     float64 // 实际费用（含抵扣）
+	TotalCashAmount float64 // 现金支付总额
+	TotalDeductions float64 // 抵用券/代金券抵扣总额
+	RunningHours    float64 // 运行小时数
+	HourlyCost      float64 // 平均每小时费用（基于实际费用）
 }
 
 // BillingSummary represents the billing summary for the current month
@@ -44,7 +48,9 @@ type BillingSummary struct {
 	ElapsedDays         int     // 本月已过天数
 	TotalRunningHours   float64 // 总运行小时数
 	Instances           []InstanceBillingSummary
-	TotalAmount         float64
+	TotalAmount         float64 // 实际费用合计（含抵扣）
+	TotalCashAmount     float64 // 现金支付合计
+	TotalDeductions     float64 // 抵用券/代金券抵扣合计
 	MonthlyEstimate     float64 // 月度估算
 	EstimateMethod      string  // 估算方法说明
 }
@@ -96,7 +102,7 @@ func (c *BillingClient) QueryBilling(instances []InstanceInfo, accountLabel stri
 
 	// Group billing items by instance
 	instanceBillings := make(map[string]*InstanceBillingSummary)
-	
+
 	// Track running seconds per instance (to avoid duplicate counting)
 	// Each instance has multiple billing items with the same ServicePeriod
 	instanceRunningSeconds := make(map[string]float64)
@@ -126,9 +132,13 @@ func (c *BillingClient) QueryBilling(instances []InstanceInfo, accountLabel stri
 			continue
 		}
 
+		// 实际费用 = 应付金额 + 抵用券抵扣
+		// 使用抵用券后 PretaxAmount 可能为 0，需加回抵扣部分得到实际成本
+		actualAmount := item.PretaxAmount + item.DeductedByCoupons
+
 		// Debug log to see actual API response fields
-		log.Debugf("[%s] Billing item: InstanceID=%s, InstanceSpec=%s, BillingItem=%s, ServicePeriod=%s, PretaxAmount=%.4f",
-			accountLabel, item.InstanceID, item.InstanceSpec, item.BillingItem, item.ServicePeriod, item.PretaxAmount)
+		log.Debugf("[%s] Billing item: InstanceID=%s, InstanceSpec=%s, BillingItem=%s, ServicePeriod=%s, PretaxAmount=%.4f, DeductedByCoupons=%.4f, actual=%.4f",
+			accountLabel, item.InstanceID, item.InstanceSpec, item.BillingItem, item.ServicePeriod, item.PretaxAmount, item.DeductedByCoupons, actualAmount)
 
 		summary, exists := instanceBillings[item.InstanceID]
 		if !exists {
@@ -166,19 +176,23 @@ func (c *BillingClient) QueryBilling(instances []InstanceInfo, accountLabel stri
 		billingItemName := formatBillingItemName(item.BillingItem, item.InstanceSpec)
 
 		billingItem := BillingItem{
-			InstanceID:      item.InstanceID,
-			InstanceName:    instInfo.InstanceName,
-			Region:          instInfo.RegionID,
-			ProductCode:     item.ProductCode,
-			ProductDetail:   item.ProductDetail,
-			BillingItemName: billingItemName,
-			InstanceSpec:    item.InstanceSpec,
-			PretaxAmount:    item.PretaxAmount,
-			Currency:        item.Currency,
+			InstanceID:        item.InstanceID,
+			InstanceName:      instInfo.InstanceName,
+			Region:            instInfo.RegionID,
+			ProductCode:       item.ProductCode,
+			ProductDetail:     item.ProductDetail,
+			BillingItemName:   billingItemName,
+			InstanceSpec:      item.InstanceSpec,
+			PretaxAmount:      item.PretaxAmount,
+			CashAmount:        item.CashAmount,
+			DeductedByCoupons: item.DeductedByCoupons,
+			Currency:          item.Currency,
 		}
 
 		summary.Items = append(summary.Items, billingItem)
-		summary.TotalAmount += item.PretaxAmount
+		summary.TotalAmount += actualAmount
+		summary.TotalCashAmount += item.CashAmount
+		summary.TotalDeductions += item.DeductedByCoupons
 	}
 
 	// Calculate total running seconds from per-instance data (deduplicated)
@@ -186,7 +200,7 @@ func (c *BillingClient) QueryBilling(instances []InstanceInfo, accountLabel stri
 	for _, seconds := range instanceRunningSeconds {
 		totalRunningSeconds += seconds
 	}
-	
+
 	// Calculate elapsed days this month
 	elapsedDays := now.Day()
 	totalRunningHours := totalRunningSeconds / 3600
@@ -213,6 +227,8 @@ func (c *BillingClient) QueryBilling(instances []InstanceInfo, accountLabel stri
 		}
 		result.Instances = append(result.Instances, *summary)
 		result.TotalAmount += summary.TotalAmount
+		result.TotalCashAmount += summary.TotalCashAmount
+		result.TotalDeductions += summary.TotalDeductions
 	}
 
 	// Calculate monthly estimate based on sum of per-instance hourly costs
@@ -223,7 +239,7 @@ func (c *BillingClient) QueryBilling(instances []InstanceInfo, accountLabel stri
 			totalHourlyCost += inst.HourlyCost
 		}
 	}
-	
+
 	if totalHourlyCost > 0 {
 		// Sum of all instance hourly costs × 720 hours
 		result.MonthlyEstimate = totalHourlyCost * 30 * 24
@@ -237,8 +253,8 @@ func (c *BillingClient) QueryBilling(instances []InstanceInfo, accountLabel stri
 		}
 	}
 
-	log.Infof("[%s] Found billing for %d instances, total: %.4f, running hours: %.2f, monthly estimate: %.2f",
-		accountLabel, len(result.Instances), result.TotalAmount, totalRunningHours, result.MonthlyEstimate)
+	log.Infof("[%s] Found billing for %d instances, total: %.4f, cash: %.4f, deductions: %.4f, running hours: %.2f, monthly estimate: %.2f",
+		accountLabel, len(result.Instances), result.TotalAmount, result.TotalCashAmount, result.TotalDeductions, totalRunningHours, result.MonthlyEstimate)
 
 	return result, nil
 }
@@ -256,7 +272,7 @@ func parseServicePeriod(servicePeriod, unit string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	// Convert to seconds based on unit
 	switch unit {
 	case "天":
