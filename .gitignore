@@ -34,4 +34,4 @@ go.work
 .DS_Store
 Thumbs.db
 
-plans
+plans.playwright-mcp/
